@@ -556,6 +556,39 @@ def relax(structure_file, functional, directory, is_metal, in_custodian, number_
 
 @workflow.command(context_settings=CONTEXT_SETTINGS)
 @click.argument("structure_file", nargs=1)
+@click.option("--functional", "-f", default="pbe",
+              help="Option for configuring the functional used in the calculation. "
+                   "User must provide the functional information in the form of a "
+                   "single string, starting with the string that determines the "
+                   "functional, then with string/float pairs for specifying further "
+                   "settings. Defaults to 'pbe'. Examples:\n"
+                   "* 'pbeu Mn\xa03.9 V 3.1' ~ PBE+U (Dudarev approach) with effective "
+                   "U equal to 3.9 for Mn and 3.1 for V.\n"
+                   "* 'hse' ~ HSE06\n"
+                   "*\xa0'hse\xa0hfscreen\xa00.3'\xa0~\xa0HSE03\n"
+              )
+@click.option("--directory", "-d", default="")
+@click.option("--in_custodian", "-c", is_flag=True)
+@click.option("--number_nodes", "-n", default=0,
+              help="Number of nodes that should be used for the calculations. Is "
+                   "required to add the proper `_category` to the Firework generated, "
+                   "so it is picked up by the right Fireworker.")
+def configuration(structure_file, functional, directory, in_custodian,
+                  number_nodes):
+    """
+    Set up a geometry optimization workflow for a range of configurations.
+    """
+    from pybat.workflow import configuration_workflow
+
+    configuration_workflow(structure_file=structure_file,
+                           functional=string_to_functional(functional),
+                           directory=directory,
+                           in_custodian=in_custodian,
+                           number_nodes=number_nodes)
+
+
+@workflow.command(context_settings=CONTEXT_SETTINGS)
+@click.argument("structure_file", nargs=1)
 @click.option("--dimer_indices", "-i", default=(0, 0))
 @click.option("--distance", "-d", default=float(0))
 @click.option("--functional", "-f", default="pbe",

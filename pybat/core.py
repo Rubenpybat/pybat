@@ -16,9 +16,12 @@ from pymatgen.core import Structure, Composition, Molecule, Site, Element
 from pymatgen.analysis.chemenv.coordination_environments.voronoi \
     import DetailedVoronoiContainer
 from pymatgen.io.vasp.outputs import Outcar
+from pymatgen.io.ase import AseAtomsAdaptor
 from pymatgen.symmetry.analyzer import SpacegroupAnalyzer
 from pymatgen.analysis.transition_state import NEBAnalysis
 from pymatgen.util.plotting import pretty_plot
+from tabulate import tabulate
+from icet.tools.structure_enumeration import enumerate_structures
 
 scipy_old_piecewisepolynomial = True
 try:
@@ -50,17 +53,6 @@ __date__ = "May 2018"
 VORONOI_DIST_FACTOR = 1.4
 VORONOI_ANG_FACTOR = 0.6
 
-# Tuple of possible cations. This idea should work fine, considering the
-# fact that these cation elements rarely serve another purpose than being
-# a cation.
-CATIONS = ("Li", "Na", "Mg")
-
-# Tolerance for determining whether two oxygens are on opposite sides of an
-# octahedron. If the angle between the two vectors connecting the site and
-# the corresponding oxygens is larger than this value, the oxygens are
-# considered to be opposites.
-OXYGEN_ANGLE_TOL = math.pi * 9 / 10
-
 # Tolerance for the representation determination. This can be pretty big, since
 # the dimer environment structure is known.
 REPRESENTATION_DIST_TOL = 5e-1
@@ -81,14 +73,28 @@ class Cathode(Structure):
     """
     A class representing a cathode material in a battery.
 
-    The main idea of this class is to keep track of the original sites by
-    using sites with empty Compositions. This is important to make sure that
-    the voronoi decomposition is successful, and hence interesting if we
-    want to look at coordinations and neighbors. Another advantage is that
-    we can consider the empty cation sites for final positions of transition
+    The main idea of this class is to keep track of the original sites of removed
+    working ions (e.g. Li, Na, ...) by using sites with empty Compositions. This is
+    important to make sure that the voronoi decomposition is successful, and hence
+    essential if we want to look at coordinations and neighbors. Another advantage
+    is that we can consider the empty cation sites for final positions of transition
     metal migrations.
 
+    By designing a new class, we can update the Structure I/O methods that do not deal
+    with sites that have an empty composition well. Moreover, we can design and bundle
+    new methods which are useful in the context of battery cathode research.
+
+    However, the class has currently not been fully tested yet for all the methods it
+    inherits from Structure, so some of these may produce some unintented results.
+
     """
+
+    # Tuple of standard working ions for typical battery insertion cathodes.
+    # Lawrencium is also in there for the enumerate workaround.
+    standard_working_ions = ("Li", "Na", "Lr")
+
+    # Tuple of standard anions for typical battery insertion cathodes.
+    standard_anions = ("O", "F")
 
     def __init__(self, lattice, species, coords, charge=None,
                  validate_proximity=False,
@@ -96,7 +102,7 @@ class Cathode(Structure):
                  site_properties=None):
 
         super(Cathode, self).__init__(
-            lattice=lattice, species=species, coords=coords,
+            lattice=lattice, species=species, coords=coords, charge=charge,
             validate_proximity=validate_proximity, to_unit_cell=to_unit_cell,
             coords_are_cartesian=coords_are_cartesian,
             site_properties=site_properties
@@ -104,63 +110,14 @@ class Cathode(Structure):
 
         self._voronoi = None
 
-    @property
-    def cation_configuration(self):
-        """
-        A list of all sites which correspond to cations in the Cathode.
-
-        Returns:
-
-        """
-        return [site for site in self.sites if site.species_string in CATIONS]
-
-    @cation_configuration.setter
-    def cation_configuration(self, configuration):
-
-        # TODO Add checks
-
-        # Remove all cations
-        for cation in [cat for cat in CATIONS if Element[cat] in set(
-                self.composition.keys())]:
-            self.replace_species({cation: {cation: 0}})
-
-        # Add the cation sites
-        if isinstance(configuration, dict):
-            for cation in configuration.keys():
-                for index in configuration[cation]:
-                    self.replace(index, cation, properties={"magmom": 0})
-
-        elif all([isinstance(item, Site) for item in configuration]):
-            for catsite in configuration:
-                for i, site in enumerate(self):
-                    if np.linalg.norm(site.distance(catsite)) < 0.05:
-                        self.replace(i, catsite.specie,
-                                     properties={"magmom": 0})
-
-        else:
-            raise TypeError("Cation configurations should be a dictionary "
-                            "mapping cations to site indices or a list of "
-                            "sites.")
-
-    @property
-    def cation_concentration(self):
-        """
-        property...
-
-        Returns:
-            (float) The conce...
-
-        """
-
-        concentration = "lala"
-
-        return concentration
-
     def __str__(self):
         """
-        Overwritten string representation, in order to provide information
-        about the cation configuration, as well as the VESTA index, which
-        is useful when defining structural changes.
+        Overwritten string representation, in order to provide information about the
+        vacancy sites, as well as the VESTA index, which can be useful when defining
+        structural changes.
+
+        Returns:
+            (str) String representation of the Cathode.
 
         """
         outs = ["Full Formula ({s})".format(s=self.composition.formula),
@@ -193,7 +150,6 @@ class Cathode(Structure):
                 row.append(props[k][i])
             data.append(row)
 
-        from tabulate import tabulate
         outs.append(
             tabulate(data,
                      headers=["#", "#VESTA", "SP", "a", "b", "c"] + keys,
@@ -201,9 +157,74 @@ class Cathode(Structure):
         return "\n".join(outs)
 
     @property
+    def working_ion_configuration(self):
+        """
+        A list of all sites which correspond to working ions in the Cathode.
+
+        Returns:
+            (list): A list of pymatgen.Sites that correspond to the working ions
+                in the Cathode.
+
+        """
+        return [site for site in self.sites
+                if site.species_string in Cathode.standard_working_ions]
+
+    @working_ion_configuration.setter
+    def working_ion_configuration(self, configuration):
+        """
+
+        Args:
+            configuration (dict or list): A dictionary mapping or list of pymatgen.Sites
+                that describes the configuration of the working ions in the cathode.
+
+        Returns:
+            None
+
+        """
+        # TODO Add checks
+
+        # Remove all working ions
+        for working_ion in [ion for ion in Cathode.standard_working_ions
+                            if Element(ion) in set(self.composition.keys())]:
+            self.replace_species({working_ion: {working_ion: 0}})
+
+        # Add the working ion sites
+        if isinstance(configuration, dict):
+            for working_ion in configuration.keys():
+                for index in configuration[working_ion]:
+                    self.replace(index, working_ion, properties={"magmom": 0})
+
+        elif all([isinstance(item, Site) for item in configuration]):
+            for ion_site in configuration:
+                for i, site in enumerate(self):
+                    if np.linalg.norm(site.distance(ion_site)) < 0.05:
+                        self.replace(i, ion_site.specie,
+                                     properties={"magmom": 0})
+
+        else:
+            raise TypeError("Working ion configurations should be a dictionary "
+                            "mapping working ions to site indices, or a list of "
+                            "sites.")
+
+    @property
+    def concentration(self):
+        """
+        The working ion concentration of the cathode, defined versus the pristine,
+        i.e. fully discharged structure as a percentage.
+
+        Returns:
+            (float): The working ion concentration
+
+        """
+        working_ion_sites = [site for site in self.sites if
+                             site.species_string in self.standard_working_ions
+                             or site.species_and_occu == Composition()]
+        return len(self.working_ion_configuration)/len(working_ion_sites)
+
+    @property
     def voronoi(self):
         """
-        ChemEnv voronoi decomposition of the cathode structure.
+        Pymatgen ChemEnv voronoi decomposition of the cathode structure.
 
         Returns:
             pymatgen.analysis.chemenv.coordination_environments.voronoi.\
@@ -222,9 +243,11 @@ class Cathode(Structure):
     def add_cations(self, sites=None):
         """
         Args:
-            sites:
+            sites: A dictionary mapping or list of pymatgen.Sites that describes the
+                configuration of the working ions in the cathode.
 
         Returns:
+            None
 
         """
 
@@ -246,17 +269,20 @@ class Cathode(Structure):
                             "mapping cations to site indices or a list of "
                             "sites.")
 
-    def remove_cations(self, sites=None):
+    def remove_working_ions(self, sites=None):
         """
-        Remove the cations from the cathode, i.e. delithiate the structure in
-        case Li is the cation of the cathode.
+        Remove working ions from the cathode, i.e. delithiate the structure in
+        case Li is the working ion of the cathode.
 
         Note that this does not remove the sites from the pymatgen Structure.
         The occupancy is simply adjusted to an empty Composition object.
 
         Args:
-            sites: List of indices
-            List of pymatgen.core.Sites which are to be removed.
+            sites: List of indices OR
+                List of pymatgen.core.Sites which are to be removed.
+
+        Returns:
+            None
 
         """
 
@@ -264,8 +290,8 @@ class Cathode(Structure):
 
         # If no sites are given
         if sites is None:
-            # Remove all the cations
-            self.cation_configuration = []
+            # Remove all the working ions
+            self.working_ion_configuration = []
 
         # If a List of integers is given
         elif all([isinstance(item, int) for item in sites]):
@@ -275,36 +301,44 @@ class Cathode(Structure):
         # If a List of sites is given
         elif all([isinstance(item, Site) for item in sites]):
             for site in sites:
-                # Check if the provided site corresponds to a cation site
-                if site in self.cation_configuration:
-                    cat_conf = self.cation_configuration.copy()
-                    cat_conf.remove(site)
-                    self.cation_configuration = cat_conf
+                # Check if the provided site corresponds to a working ion site
+                if site in self.working_ion_configuration:
+                    ion_configuration = self.working_ion_configuration.copy()
+                    ion_configuration.remove(site)
+                    self.working_ion_configuration = ion_configuration
                 else:
-                    raise Warning("Requested site not found in cation "
+                    raise Warning("Requested site not found in working ion "
                                   "configuration.")
         else:
             raise IOError("Incorrect site input.")
 
-    def change_site_distance(self, site_indices, distance):
+    def change_site_distance(self, sites, distance):
         """
         Change the coordinates of two sites in a structure in order to adjust
         their distance.
 
         Args:
-            site_indices:
-            distance:
+            sites (list): List of two site indices or pymatgen.Sites of
+                elements whose distance should be changed.
+            distance (float): Final distance between the two sites provided.
+
+        Returns:
+            None
+
         """
 
-        # TODO Add possibility of site_indices simply being the sites
-
-        site_a = self.sites[site_indices[0]]
-        site_b = self.sites[site_indices[1]]
+        if all(isinstance(el, int) for el in sites):
+            site_a = self.sites[sites[0]]
+            site_b = self.sites[sites[1]]
+        elif all(isinstance(el, Site) for el in sites):
+            site_a = sites[0]
+            site_b = sites[1]
+        else:
+            raise IOError("Incorrect input provided.")
 
         # Find the distance between the sites, as well as the image of site B
         # closest to site A
-        (original_distance, closest_image_b) = site_a.distance_and_image(
-            site_b)
+        (original_distance, closest_image_b) = site_a.distance_and_image(site_b)
 
         image_cart_coords = self.lattice.get_cartesian_coords(
             site_b.frac_coords + closest_image_b
@@ -312,26 +346,22 @@ class Cathode(Structure):
 
         # Calculate the vector that connects site A with site B
         connection_vector = image_cart_coords - site_a.coords
-
-        # Make it a unit vector
-        connection_vector /= np.linalg.norm(connection_vector)
+        connection_vector /= np.linalg.norm(connection_vector)  # Unit vector
 
         # Calculate the distance the sites need to be moved.
         site_move_distance = (original_distance - distance) / 2
 
         # Calculate the new cartesian coordinates of the sites
-        new_site_a_coords = site_a.coords \
-                            + site_move_distance * connection_vector
-        new_site_b_coords = site_b.coords \
-                            - site_move_distance * connection_vector
+        new_site_a_coords = site_a.coords + site_move_distance * connection_vector
+        new_site_b_coords = site_b.coords - site_move_distance * connection_vector
 
         # Change the sites in the structure
-        self.replace(i=site_indices[0], species=site_a.species_string,
+        self.replace(i=sites[0], species=site_a.species_string,
                      coords=new_site_a_coords,
                      coords_are_cartesian=True,
                      properties=site_a.properties)
 
-        self.replace(i=site_indices[1], species=site_b.species_string,
+        self.replace(i=sites[1], species=site_b.species_string,
                      coords=new_site_b_coords,
                      coords_are_cartesian=True,
                      properties=site_b.properties)
@@ -350,6 +380,10 @@ class Cathode(Structure):
                 moments of the optimized structure should be ignored. This means
                 that the magnetic moments of the Cathode structure will
                 remain the same.
+
+        Returns:
+            None
+
         """
 
         new_cathode = Cathode.from_file(os.path.join(directory, "CONTCAR"))
@@ -380,19 +414,33 @@ class Cathode(Structure):
                              properties=new_site.properties)
                 new_index += 1
 
+    def set_to_high_spin(self):
+        """
+
+        :return:
+        """
+        raise NotImplementedError
+
+    def set_to_low_spin(self):
+        """
+
+        :return:
+        """
+        raise NotImplementedError
+
     def find_noneq_cations(self):
         """
         Find a list of the site indices of all non-equivalent cations.
 
         Returns:
-            List of site indices
+            (list): List of site indices
 
         """
         symmops = SpacegroupAnalyzer(self).get_space_group_operations()
 
         cation_indices = [
             index for index in range(len(self.sites))
-            if not self.sites[index].species_string == "O"
+            if not self.sites[index].species_string not in Cathode.standard_anions
         ]
 
         # Start with adding the first cation
@@ -418,29 +466,105 @@ class Cathode(Structure):
 
         return inequiv_cations
 
-    def find_cation_configurations(self):
+    def get_cation_configurations(self, substitution_sites, cation_list, sizes,
+                                  concentration_restrictions=None,
+                                  max_configurations=None):
         """
-        Plan is to find all non-equivalent cation configurations. Is probably
-        already implemented elsewhere.
+        Get all non-equivalent cation configurations within a specified range of unit
+        cell sizes and based on certain restrictions.
+
+        Based on the icet.tools.structure_enumeration.enumerate_structures() method.
+        Because there are some issues with this method, related to the allowed
+        concentrations, the method will have to be updated later. There is also the fact
+        that vacancies can not be inserted in enumerate_structures, which will require
+        some workaround using Lawrencium.
+
+        Currently also returns a list of Cathodes, for easy implementation and usage. It
+        might be more useful/powerful to design it as a generator later.
+
+        Args:
+            substitution_sites (list): List of site indices or pymatgen.Sites to be
+                substituted.
+            cation_list (list): List of string representations of the cation elements
+                which have to be substituted on the substitution sites. Can also
+                include "Vac" to introduce vacancy sites.
+                E.g. ["Li", "Vac"]; ["Mn", "Co", "Ni"]; ...
+            sizes (list): List of unit supercell sizes to be considered for the
+                enumeration of the configurations.
+                E.g. [1, 2]; range(1, 4); ...
+            concentration_restrictions (dict): Dictionary of allowed concentration
+                ranges for each element. Note that the concentration is defined
+                versus the total amount of atoms in the unit cell.
+                E.g. {"Li": (0.2, 0.3)}; {"Ni": (0.1, 0.2, "Mn": (0.05, 0.1)}; ...
+            max_configurations (int): Maximum number of configurations to generate.
 
         Returns:
+            (list): List of Cathodes representing different configurations.
 
         """
-        raise NotImplementedError
+        # Check substitution_site input
+        if all(isinstance(site, int) for site in substitution_sites):
+            substitution_sites = [self.sites[index] for index in substitution_sites]
 
-    def set_to_high_spin(self):
-        """
+        # Set up the configuration space
+        configuration_space = []
+        cation_list = ["Lr" if cat == "Vac" else cat for cat in cation_list]
 
-        :return:
-        """
-        raise NotImplementedError
+        for site in self.sites:
+            if site in substitution_sites:
+                configuration_space.append(cation_list)
+            else:
+                configuration_space.append([site.species_string, ])
 
-    def set_to_low_spin(self):
-        """
+        # TODO adjust this once concentration restrictions work correctly for
+        # enumerate_structures
+        if concentration_restrictions:
+            # Get the largest concentration restriction
+            enum_conc_restrictions = [
+                {k: v} for k, v in concentration_restrictions.items()
+                if v == max(concentration_restrictions.values())][0]
+        else:
+            concentration_restrictions = {}
+            enum_conc_restrictions = None
 
-        :return:
-        """
-        raise NotImplementedError
+        configuration_list = []
+        configuration_generator = enumerate_structures(
+            atoms=AseAtomsAdaptor.get_atoms(self.as_ordered_structure()),
+            sizes=sizes,
+            chemical_symbols=configuration_space,
+            concentration_restrictions=enum_conc_restrictions
+        )
+        try:
+            self.site_properties["magmom"]
+        except KeyError:
+            print("No magnetic moments found in structure, setting to zero.")
+            self.add_site_property("magmom", [0] * len(self))
+
+        for atoms in configuration_generator:
+
+            structure = AseAtomsAdaptor.get_structure(atoms)
+            structure.add_site_property(
+                "magmom",
+                self.site_properties["magmom"] * int(len(structure) / len(self))
+            )
+
+            frac_composition = structure.composition.fractional_composition
+            elements = [str(el) for el in structure.composition.elements]
+            c = concentration_restrictions
+
+            if all([c[el][0] < frac_composition[el] < c[el][1]
+                    for el in elements if c.get(el, False)]):
+                cathode = Cathode.from_structure(structure.get_sorted_structure())
+                cathode.remove_working_ions(
+                    [i for i, site in enumerate(cathode)
+                     if site.species_string == "Lr"]
+                )
+                configuration_list.append(cathode)
+
+            if len(configuration_list) == max_configurations:
+                break
+
+        return configuration_list
 
     def as_ordered_structure(self):
         """
@@ -461,7 +585,7 @@ class Cathode(Structure):
     def to(self, fmt=None, filename=None, **kwargs):
         """
         Structure method override to solve issue with writing the Cathode to a
-        POSCAR file
+        POSCAR file.
 
         # TODO Figure out what exactly was the problem here again... Should
         have written this down immediately! I think it had something to do
@@ -506,20 +630,25 @@ class LiRichCathode(Cathode):
 
     """
 
+    # Tolerance for determining whether two oxygens are on opposite sides of an
+    # octahedron. If the angle between the two vectors connecting the site and
+    # the corresponding oxygens is larger than this value, the oxygens are
+    # considered to be opposites.
+    oxygen_angle_tol = math.pi * 9 / 10
+
     def __init__(self, lattice, species, coords, charge=None,
                  validate_proximity=False,
                  to_unit_cell=False, coords_are_cartesian=False,
                  site_properties=None):
 
         super(LiRichCathode, self).__init__(
-            lattice=lattice, species=species, coords=coords,
+            lattice=lattice, species=species, coords=coords, charge=charge,
             validate_proximity=validate_proximity, to_unit_cell=to_unit_cell,
             coords_are_cartesian=coords_are_cartesian,
             site_properties=site_properties
         )
 
-    def find_oxygen_dimers(self, site_index=None,
-                           oxygen_angle_tol=OXYGEN_ANGLE_TOL):
+    def find_oxygen_dimers(self, site_index=None, oxygen_angle_tol=None):
         """
         Returns a list of index pairs corresponding to the oxygen dimers that
         can be formed around the site provided by the user, i.e. with oxygens
@@ -527,10 +656,14 @@ class LiRichCathode(Cathode):
 
         Args:
             site_index:
+            oxygen_angle_tol:
 
         Returns:
 
         """
+
+        if not oxygen_angle_tol:
+            oxygen_angle_tol = LiRichCathode.oxygen_angle_tol
 
         if site_index is None:
 
@@ -578,23 +711,21 @@ class LiRichCathode(Cathode):
             for oxygen_pair in oxygen_combinations:
 
                 site = self.sites[site_index]
-                oxygen_site_A = self.sites[oxygen_pair[0]]
-                oxygen_site_B = self.sites[oxygen_pair[1]]
+                oxygen_site_a = self.sites[oxygen_pair[0]]
+                oxygen_site_b = self.sites[oxygen_pair[1]]
 
-                oxygen_image_A = site.distance_and_image(oxygen_site_A)[1]
-                oxygen_image_B = site.distance_and_image(oxygen_site_B)[1]
+                oxygen_image_a = site.distance_and_image(oxygen_site_a)[1]
+                oxygen_image_b = site.distance_and_image(oxygen_site_b)[1]
 
-                image_A_cart_coords = oxygen_site_A.coords \
-                                      + np.dot(oxygen_image_A,
-                                               self.lattice.matrix)
-                image_B_cart_coords = oxygen_site_B.coords \
-                                      + np.dot(oxygen_image_B,
-                                               self.lattice.matrix)
+                image_a_cart_coords = oxygen_site_a.coords + np.dot(oxygen_image_a,
+                                                                    self.lattice.matrix)
+                image_b_cart_coords = oxygen_site_b.coords + np.dot(oxygen_image_b,
+                                                                    self.lattice.matrix)
 
-                oxygen_vector_A = image_A_cart_coords - site.coords
-                oxygen_vector_B = image_B_cart_coords - site.coords
+                oxygen_vector_a = image_a_cart_coords - site.coords
+                oxygen_vector_b = image_b_cart_coords - site.coords
 
-                if angle_between(oxygen_vector_A, oxygen_vector_B) < \
+                if angle_between(oxygen_vector_a, oxygen_vector_b) < \
                         oxygen_angle_tol:
                     oxygen_dimers.append(oxygen_pair)
 
@@ -620,9 +751,9 @@ class LiRichCathode(Cathode):
         dimer_environment = Dimer(self, dimer_indices).sites
 
         remove_sites = [site for site in dimer_environment
-                        if site.species_string in CATIONS]
+                        if site.species_string in Cathode.standard_anions]
 
-        self.remove_cations(remove_sites)
+        self.remove_working_ions(remove_sites)
 
     def find_noneq_dimers(self, site_index=None, method="symmops"):
         """
@@ -897,8 +1028,7 @@ class Dimer(MSONable):
                 oxygen_sites[1])
 
             image_cart_coords = oxygen_sites[1].coords \
-                                + np.dot(oxygen_image,
-                                         self.cathode.lattice.matrix)
+                                + np.dot(oxygen_image, self.cathode.lattice.matrix)
 
             self._center = (oxygen_sites[0].coords + image_cart_coords) / 2
 
@@ -944,28 +1074,24 @@ class Dimer(MSONable):
 
                 # Find the sites which are in the plane of the oxygens and
                 # their shared neighbors.
-                if np.linalg.norm(oxy_1.coords
-                                  - (
-                                          shared_neighbor_4.coords - oxy_1.coords)
-                                  - site.coords) < REPRESENTATION_DIST_TOL:
+                if np.linalg.norm(
+                        oxy_1.coords - (shared_neighbor_4.coords - oxy_1.coords)
+                        - site.coords) < REPRESENTATION_DIST_TOL:
                     representation[5] = site.species_and_occu
 
-                if np.linalg.norm(oxy_1.coords
-                                  - (
-                                          shared_neighbor_3.coords - oxy_1.coords)
-                                  - site.coords) < REPRESENTATION_DIST_TOL:
+                if np.linalg.norm(
+                        oxy_1.coords - (shared_neighbor_3.coords - oxy_1.coords)
+                        - site.coords) < REPRESENTATION_DIST_TOL:
                     representation[6] = site.species_and_occu
 
-                if np.linalg.norm(oxy_2.coords
-                                  - (
-                                          shared_neighbor_4.coords - oxy_2.coords)
-                                  - site.coords) < REPRESENTATION_DIST_TOL:
+                if np.linalg.norm(
+                        oxy_2.coords - (shared_neighbor_4.coords - oxy_2.coords)
+                        - site.coords) < REPRESENTATION_DIST_TOL:
                     representation[7] = site.species_and_occu
 
-                if np.linalg.norm(oxy_2.coords
-                                  - (
-                                          shared_neighbor_3.coords - oxy_2.coords) \
-                                  - site.coords) < REPRESENTATION_DIST_TOL:
+                if np.linalg.norm(
+                        oxy_2.coords - (shared_neighbor_3.coords - oxy_2.coords)
+                        - site.coords) < REPRESENTATION_DIST_TOL:
                     representation[8] = site.species_and_occu
 
                 # Find the sites which are out of plane
@@ -1330,15 +1456,3 @@ def is_number(s):
         return True
     except ValueError:
         return False
-
-def new_function(arg1, arg2):
-    """
-    This describes the function.
-
-    Args:
-        arg1 (list):
-        arg2:
-
-    Returns:
-
-    """
