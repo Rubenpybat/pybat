@@ -851,25 +851,22 @@ def site_dimers_workflow(structure_file, site_index, distance,
                        in_custodian=in_custodian,
                        number_nodes=number_nodes)
 
-def cluster_exp_workflow{}
-"""
+def cluster_exp_workflow():
+    """
+    1. Geef ontladen eenheidscel van een stacking.
+    2. Via enumerate de mangaan en zuurstof vasthouden en alle mogelijke combo's maken van Li en vac
+    3. Ordenen per concentratie, dus len_cation_configuration/len(cation_sites)
+    4. Maak directories aan voor de concentraties en steek alle configuraties in de bijhorende concentratie directory.
+    5. Laat een SCF lopen over alle concentraties
+    6. Laat een relax lopen over alle concentraties
+    7. Schrijf de interne energieën per configuratie weg.
 
-
-1. Geef ontladen eenheidscel van een stacking. 
-2. Via enumerate de mangaan en zuurstof vasthouden en alle mogelijke combo's maken van Li en vac
-3. Ordenen per concentratie, dus len_cation_configuration/len(cation_sites)
-4. Maak directories aan voor de concentraties en steek alle configuraties in de bijhorende concentratie directory.
-5. Laat een SCF lopen over alle concentraties
-6. Laat een relax lopen over alle concentraties
-7. Schrijf de interne energieën per configuratie weg.
-
-Om te beginnen: Ga ervan uit dat je een dictionary (configurations{O3:[]}) hebt waarin je een stacking hebt en daarin alle mogelijke configuraties in een lijst voor die stacking.
-probeer de concentratie te bepalen door de posities met lithium te delen door de posities lithium + vacancies.
-Maak directories volgens de aanwezige concentraties en aan smijt alle bijhorende cofiguraties in de juiste directory
-Orden de configuratue van kleine naar grote eenheidscel
-
-
-"""
+    Om te beginnen: Ga ervan uit dat je een lijst [] hebt waarin je een stacking hebt en daarin alle mogelijke configuraties in een lijst voor die stacking.
+    probeer de concentratie te bepalen door de posities met lithium te delen door de posities lithium + vacancies.
+    Maak directories volgens de aanwezige concentraties en aan smijt alle bijhorende cofiguraties in de juiste directory
+    Orden de configuratue van kleine naar grote eenheidscel
+    """
+    raise NotImplementedError
 
 
 # endregion

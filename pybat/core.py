@@ -142,6 +142,20 @@ class Cathode(Structure):
                             "mapping cations to site indices or a list of "
                             "sites.")
 
+    @property
+    def cation_concentration(self):
+        """
+        property...
+
+        Returns:
+            (float) The conce...
+
+        """
+
+        concentration = "lala"
+
+        return concentration
+
     def __str__(self):
         """
         Overwritten string representation, in order to provide information
