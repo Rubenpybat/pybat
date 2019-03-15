@@ -112,7 +112,7 @@ def data(vasprun_file):
     Extract the main data from a vasprun.xml file and write it as a data.json.
 
     Args:
-        vasprun_file:
+        vasprun_file (str):
 
     Returns:
 
@@ -124,5 +124,5 @@ def data(vasprun_file):
         file.write(vasprun.to_json())
 
 
-def print(structure_file):
+def print_structure(structure_file):
     print(Cathode.from_file(structure_file))

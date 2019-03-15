@@ -345,8 +345,8 @@ def transition(directory, functional, is_metal, is_migration, optimize_initial):
                    "* 'hse' ~ HSE06\n"
                    "*\xa0'hse\xa0hfscreen\xa00.3'\xa0~\xa0HSE03\n"
               )
-@click.option("--nimages", "-n", default=8,
-              help="Number of images.")
+@click.option("--nimages", "-N", default=7,
+              help="Number of images. Defaults to 7.")
 @click.option("--is_metal", "-m", is_flag=True,
               help="Flag to indicate that the structure is metallic. This "
                    "will make the algorithm choose Methfessel-Paxton "
@@ -466,9 +466,9 @@ def print(structure_file):
     Print the cathode details to the screen.
 
     """
-    from pybat.cli.commands.util import print
+    from pybat.cli.commands.util import print_structure
 
-    print(structure_file=structure_file)
+    print_structure(structure_file=structure_file)
 
 
 # endregion
@@ -507,7 +507,10 @@ def scf(structure_file, functional, directory, write_chgcar, in_custodian, numbe
     """
     Set up an SCF calculation workflow.
     """
-    from pybat.workflow import scf_workflow
+    from pybat.workflow.workflows import scf_workflow
+
+    if number_nodes == 0:
+        number_nodes = None
 
     scf_workflow(structure_file=structure_file,
                  functional=string_to_functional(functional),
@@ -544,7 +547,7 @@ def relax(structure_file, functional, directory, is_metal, in_custodian, number_
     """
     Set up a geometry optimization workflow.
     """
-    from pybat.workflow import relax_workflow
+    from pybat.workflow.workflows import relax_workflow
 
     relax_workflow(structure_file=structure_file,
                    functional=string_to_functional(functional),
@@ -578,7 +581,7 @@ def configuration(structure_file, functional, directory, in_custodian,
     """
     Set up a geometry optimization workflow for a range of configurations.
     """
-    from pybat.workflow import configuration_workflow
+    from pybat.workflow.workflows import configuration_workflow
 
     configuration_workflow(structure_file=structure_file,
                            functional=string_to_functional(functional),
@@ -616,7 +619,7 @@ def dimer(structure_file, dimer_indices, distance, functional, is_metal,
     """
     Set up dimer calculation workflows.
     """
-    from pybat.workflow import dimer_workflow
+    from pybat.workflow.workflows import dimer_workflow
 
     dimer_workflow(structure_file=structure_file,
                    dimer_indices=dimer_indices,
@@ -630,7 +633,7 @@ def dimer(structure_file, dimer_indices, distance, functional, is_metal,
 @workflow.command(context_settings=CONTEXT_SETTINGS)
 @click.argument("directory", nargs=1)
 @click.option("--nimages", "-N", default=7,
-              help="Number of images.")
+              help="Number of images. Defaults to 7.")
 @click.option("--functional", "-f", default="pbe",
               help="Option for configuring the functional used in the calculation. "
                    "User must provide the functional information in the form of a "
@@ -664,7 +667,7 @@ def neb(directory, nimages, functional, is_metal, is_migration, in_custodian,
     """
     Set up dimer calculation workflows.
     """
-    from pybat.workflow import neb_workflow
+    from pybat.workflow.workflows import neb_workflow
 
     neb_workflow(directory=directory,
                  nimages=nimages,
@@ -703,7 +706,7 @@ def noneq_dimers(structure_file, distance, functional, is_metal, in_custodian,
     """
     Set up dimer calculations for all nonequivalent dimers in a structure.
     """
-    from pybat.workflow import noneq_dimers_workflow
+    from pybat.workflow.workflows import noneq_dimers_workflow
 
     noneq_dimers_workflow(structure_file=structure_file,
                           distance=distance,
@@ -742,7 +745,7 @@ def site_dimers(site_index, structure_file, distance, functional, is_metal, in_c
     """
     Set up dimer calculations for all nonequivalent dimers in a structure.
     """
-    from pybat.workflow import site_dimers_workflow
+    from pybat.workflow.workflows import site_dimers_workflow
 
     site_dimers_workflow(structure_file=structure_file,
                          site_index=site_index,

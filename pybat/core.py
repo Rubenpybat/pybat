@@ -156,6 +156,12 @@ class Cathode(Structure):
                      ))
         return "\n".join(outs)
 
+    def __hash__(self):
+        return hash(str(self))
+
+    def __eq__(self, other):
+        return self == other.__hash__()
+
     @property
     def working_ion_configuration(self):
         """
@@ -219,7 +225,7 @@ class Cathode(Structure):
         working_ion_sites = [site for site in self.sites if
                              site.species_string in self.standard_working_ions
                              or site.species_and_occu == Composition()]
-        return len(self.working_ion_configuration)/len(working_ion_sites)
+        return len(self.working_ion_configuration) / len(working_ion_sites)
 
     @property
     def voronoi(self):
