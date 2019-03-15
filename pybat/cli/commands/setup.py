@@ -1,4 +1,4 @@
-# Encoding: UTF-8
+# coding: utf8
 # Copyright (c) Marnik Bercx, University of Antwerp
 # Distributed under the terms of the MIT License
 
@@ -22,10 +22,10 @@ Setup scripts for the calculations.
 
 __author__ = "Marnik Bercx"
 __copyright__ = "Copyright 2018, Marnik Bercx, University of Antwerp"
-__version__ = "0.1"
+__version__ = "pre-alpha"
 __maintainer__ = "Marnik Bercx"
 __email__ = "marnik.bercx@uantwerpen.be"
-__date__ = "Jul 2018"
+__date__ = "Mar 2019"
 
 MODULE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "../../set_configs")
@@ -337,8 +337,11 @@ def neb(directory, nimages=7, functional=("pbe", {}), is_metal=False,
         raise FileNotFoundError("Could not find required structure "
                                 "information in " + initial_dir + ".")
 
-    final_structure = Structure.from_file(os.path.join(final_dir,
-                                                       "CONTCAR"))
+    try:
+        final_structure = Structure.from_file(os.path.join(final_dir, "CONTCAR"))
+    except FileNotFoundError:
+        final_structure = Cathode.from_file(
+            os.path.join(final_dir, "final_cathode.json")).as_ordered_structure()
 
     # In case the transition is a migration
     if is_migration:
@@ -357,6 +360,7 @@ def neb(directory, nimages=7, functional=("pbe", {}), is_metal=False,
 
         images = neb_path.images
         neb_path.plot_images("neb.vasp")
+
     # In case an "middle image" has been provided via which to interpolate
     elif os.path.exists(os.path.join(directory, "middle")):
         print("Found a 'middle' directory in the NEB directory. Interpolating "

@@ -1,4 +1,4 @@
-# Encoding: UTF-8
+# coding: utf8
 # Copyright (c) Marnik Bercx, University of Antwerp
 # Distributed under the terms of the MIT License
 
@@ -13,16 +13,16 @@ from pymatgen.io.vasp.inputs import Poscar
 from pymatgen.io.vasp.sets import DictSet
 
 """
-Package that described the various calculation sets used.
+Package that described the various calculation sets used for the setup scripts.
 
 """
 
 __author__ = "Marnik Bercx"
 __copyright__ = "Copyright 2018, Marnik Bercx, University of Antwerp"
-__version__ = "0.1"
+__version__ = "pre-alpha"
 __maintainer__ = "Marnik Bercx"
 __email__ = "marnik.bercx@uantwerpen.be"
-__date__ = "May 2018"
+__date__ = "Mar 2019"
 
 MODULE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "set_configs/")
@@ -48,7 +48,7 @@ class BulkRelaxSet(DictSet):
 
 class BulkSCFSet(DictSet):
     """
-    VASP input set for the bulk relaxation.
+    VASP input set for the bulk SCF calculation.
 
     """
     CONFIG = _load_yaml_config("bulkSCFSet")
@@ -59,50 +59,24 @@ class BulkSCFSet(DictSet):
         self.kwargs = kwargs
 
 
-class PybatRelaxSet(DictSet):
+class PybatNEBSet(BulkRelaxSet):
     """
-    Subclass of the MITNEBSet, with specific settings for migration
-    calculations in batteries, i.e. POTCAR files with more valence electrons
-    and ISIF = 2.
+    Class for writing NEB inputs, based on the settings of BulkRelaxSet.
 
-    """
-
-    CONFIG = _load_yaml_config("pybatRelaxSet")
-
-    def __init__(self, structure, hse_calculation=False, **kwargs):
-        super(PybatRelaxSet, self).__init__(
-            structure, PybatNEBSet.CONFIG, **kwargs
-        )
-
-        # HSE specific defaults
-        if hse_calculation:
-            hse_config = {"ALGO": "All", "HFSCREEN": 0.2, "LDAU": False,
-                          "LHFCALC": True, "PRECFOCK": "Fast"}
-            self._config_dict["INCAR"].update(hse_config)
-
-        self.kwargs = kwargs
-
-
-class PybatNEBSet(PybatRelaxSet):
-    """
-    Class for writing NEB inputs, based on the settings of pybatRelaxSet.
-
-    This class was largely copied from the MITNEBSet in pymatgen.io.vasp.sets.
-    However, note that we changed the defaults to include LDA+U.
+    This class was largely copied from the MITNEBSet in pymatgen.io.vasp.sets,
+    But then using the defaults specified in BulkRelaxSet. We've also added a new
+    method for visualizing the transition.
 
     Args:
         \\*\\*kwargs: Other kwargs supported by :class:`DictSet`.
 
     """
 
-    # TODO make this class independent of PyBatRelaxSet
-
-    def __init__(self, structures, hse_calculation=False, **kwargs):
+    def __init__(self, structures, **kwargs):
         if len(structures) < 3:
             raise ValueError("You need at least 3 structures for an NEB.")
         kwargs["sort_structure"] = False
-        super(PybatNEBSet, self).__init__(structures[0], hse_calculation,
-                                          **kwargs)
+        super(PybatNEBSet, self).__init__(structures[0], **kwargs)
         self._structures = self._process_structures(structures)
 
         if "EDIFF" not in self._config_dict["INCAR"]:
@@ -129,6 +103,7 @@ class PybatNEBSet(PybatRelaxSet):
     def _process_structures(self, structures):
         """
         Remove any atom jumps across the cell
+
         """
         input_structures = structures
         structures = [input_structures[0]]
@@ -157,6 +132,7 @@ class PybatNEBSet(PybatRelaxSet):
             write_path_cif (bool): If true, writes a cif for each image.
             write_endpoint_inputs (bool): If true, writes input files for
                 running endpoint calculations.
+
         """
 
         if make_dir_if_not_present and not os.path.exists(output_dir):
@@ -173,7 +149,7 @@ class PybatNEBSet(PybatRelaxSet):
             if write_cif:
                 p.structure.to(filename=os.path.join(d, '{}.cif'.format(i)))
         if write_endpoint_inputs:
-            end_point_param = PybatRelaxSet(
+            end_point_param = BulkRelaxSet(
                 self.structures[0],
                 user_incar_settings=self.user_incar_settings)
 
@@ -189,16 +165,16 @@ class PybatNEBSet(PybatRelaxSet):
                 )
         if write_path_cif:
             sites = set()
-            l = self.structures[0].lattice
+            lattice = self.structures[0].lattice
             for site in chain(*(s.sites for s in self.structures)):
                 sites.add(PeriodicSite(site.species_and_occu, site.frac_coords,
-                                       l))
+                                       lattice))
             nebpath = Structure.from_sites(sorted(sites))
             nebpath.to(filename=os.path.join(output_dir, 'path.cif'))
 
     def visualize_transition(self, filename="transition.cif"):
         """
-        Write a file to show the transition
+        Write a file to show the transition by simply adding all images.
 
         """
 
